@@ -7,5 +7,5 @@ app.register_blueprint(tweets_api)
 
 
 if __name__ == "__main__":
-    Storage.generate_tweets()
+   # Storage.generate_tweets()
     app.run(host="0.0.0.0", port=5000, debug=True)

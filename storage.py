@@ -1,21 +1,23 @@
-import json, uuid
+import pg8000, functools
 
-global_username = "zaba_ljubica"
+from config import Config
+from tweet import Tweet
 
 
-class Tweet(object):
-    def __init__(self, tweet_body):
-        self.id = str(uuid.uuid4())
-        self.name = global_username
-        self.tweet = tweet_body
+def uses_db(f):
+    @functools.wraps(f)
+    def wrapper(cls, *args, **kwargs):
+        cursor = cls._conn.cursor()
+        res = f(cls, cursor, *args, **kwargs)
+        cursor.close()
+        cls._conn.commit()
+        return res
 
-    def to_dict(self):
-        return self.__dict__
+    return wrapper
 
 
 class Storage(object):
-    _tweets = {}
-    _counter = 0
+    _conn = pg8000.connect(**Config.DB_CONFIG)
 
     @classmethod
     def generate_tweets(cls):
@@ -24,25 +26,57 @@ class Storage(object):
         cls.put_tweet("Cheating tweet!")
 
     @classmethod
-    def get_tweets(cls):
-        return cls._tweets.values()
+    @uses_db
+    def get_tweets(cls, cursor):
+        cursor.execute(
+            """
+            SELECT id, name, tweet FROM tweets
+            """
+        )
+        tweets = [Tweet(*data) for data in cursor.fetchall()]
+        return tweets
 
     @classmethod
-    def get_tweet(cls, tweet_id):
-        if cls._tweets.get(tweet_id, None):
-            return cls._tweets[tweet_id]
+    @uses_db
+    def get_tweet(cls, cursor, tweet_id):
+        cursor.execute(
+            """
+            SELECT id, name, tweet FROM tweets
+            WHERE id=%s
+            """,
+            (tweet_id,)
+        )
+        res = cursor.fetchone()
+        if res:
+            return Tweet(*res)
         else:
-            return None
+            raise TweetNotFoundError("Tweet with id #{} is not found".format(tweet_id))
 
     @classmethod
-    def put_tweet(cls, tweet):
-        new_tweet = Tweet(tweet)
-        cls._tweets[new_tweet.id] = new_tweet
+    @uses_db
+    def put_tweet(cls, cursor, tweet):
+        cursor.execute(
+            """
+            INSERT INTO tweets (name, tweet)
+            VALUES ( %s, %s ) RETURNING id, name, tweet
+            """,
+            (Config.NAME, tweet)
+        )
+        data = cursor.fetchone()
+        new_tweet = Tweet(*data)
+        return new_tweet
 
     @classmethod
-    def delete_tweet(cls, tweet_id):
-        if cls._tweets.get(tweet_id, None):
-            del cls._tweets[tweet_id]
-            return "OK"
-        else:
-            return "No tweet with id #{}".format(tweet_id)
+    @uses_db
+    def delete_tweet(cls, cursor, tweet_id):
+        cursor.execute(
+            """
+        DELETE FROM tweets
+        WHERE id=%s
+        """,
+            (tweet_id,)
+        )
+
+
+class TweetNotFoundError(Exception):
+    pass
